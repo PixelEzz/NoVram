@@ -35,6 +35,11 @@ jobs:
             goarch: arm64
             artifact_name: novram-darwin-arm64
             archive_ext: tar.gz
+          - os: macos-13
+            goos: darwin
+            goarch: amd64
+            artifact_name: novram-darwin-amd64
+            archive_ext: tar.gz
 
     steps:
       - name: Checkout Source Code

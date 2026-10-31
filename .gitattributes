@@ -1,0 +1,28 @@
+# Auto-detect text files and normalize newlines to LF on checkout
+* text=auto eol=lf
+
+# Force CRLF on Windows script files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Force LF on Unix shell scripts and Makefiles
+*.sh text eol=lf
+Makefile text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.go text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.s text eol=lf
+*.md text eol=lf
+
+# Binary files
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.gguf binary
+*.bin binary
+*.zip binary
+*.tar.gz binary

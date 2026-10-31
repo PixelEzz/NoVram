@@ -1,0 +1,34 @@
+name: CI Test & Build
+
+on:
+  push:
+    branches: [ master, main, 'feat/**' ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Run Test Suite
+        run: go test -v ./...
+
+      - name: Test Build Binary
+        run: go build -v ./cmd/novram
+
+      - name: Test Doctor Command
+        run: |
+          ./novram doctor || .\novram.exe doctor
