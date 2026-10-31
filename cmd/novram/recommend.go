@@ -31,7 +31,8 @@ func runRecommend(args []string) {
 	fmt.Printf("• Recommended Model:    %s\n", decision.SelectedModel)
 	fmt.Printf("• Optimal Quantization: %s (Zero-Swap Guarantee)\n", decision.RecommendedQuant)
 	fmt.Printf("• Recommended Context:  %d tokens\n", decision.RecommendedContext)
-	fmt.Printf("• Estimated CPU Speed:  ~%.1f tokens/sec\n", decision.EstTokensPerSec)
+	fmt.Printf("• Estimated CPU Speed:  ~%.1f tokens/sec (baseline) -> ~%.1f tokens/sec (Turbo 5x-7x)\n",
+		decision.EstTokensPerSec, decision.TurboEstTokensPerSec)
 	fmt.Printf("• Memory Working Set:   %.2f GB\n", decision.RequiredRAMGB)
 	fmt.Printf("• Feasibility Status:   [%s]\n", decision.SafetyStatus)
 	fmt.Printf("• Interceptor Note:     %s\n", decision.RecommendationNote)

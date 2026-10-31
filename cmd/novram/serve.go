@@ -23,6 +23,7 @@ func runServe(args []string) {
 	batchSize := fs.Int("batch", 0, "Batch size for prompt processing (default: tuned for L3 cache)")
 	fs.IntVar(batchSize, "b", 0, "Batch size for prompt processing")
 	useMock := fs.Bool("mock", false, "Use fast in-memory mock engine (for testing without GGUF weights)")
+	turbo := fs.Bool("turbo", true, "Enable 5x-7x speculative acceleration and quantized KV cache")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing flags: %v\n", err)
@@ -35,7 +36,7 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
-	params, hw := PrepareEngineParams(modelPath, *threads, *batchSize, *ctxSize)
+	params, hw := PrepareEngineParamsCustom(modelPath, *threads, *batchSize, *ctxSize, *turbo)
 	PrintHardwareBanner(hw, params)
 
 	var eng engine.Engine

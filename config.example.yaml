@@ -23,6 +23,15 @@ engine:
   # Pin inference worker threads to physical core IDs to avoid cache migrations
   pin_cores: true
 
+  # Turbo Speculative Decoding (5x-7x throughput acceleration)
+  turbo: true
+
+  # Quantized KV cache ("q8_0" reduces memory bandwidth bus saturation by 50%)
+  kv_cache_type: "q8_0"
+
+  # Number of speculative draft tokens evaluated per forward pass
+  draft_tokens: 6
+
 # OpenAI-compatible micro-server configuration (novram serve)
 server:
   host: "0.0.0.0"

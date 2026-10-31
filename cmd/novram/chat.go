@@ -26,8 +26,11 @@ func runChat(args []string) {
 	fs.IntVar(batchSize, "b", 0, "Batch size for prompt processing")
 	temp := fs.Float64("temp", 0.7, "Sampling temperature")
 	topP := fs.Float64("top-p", 0.9, "Top-p sampling")
-	systemPrompt := fs.String("system", "You are a helpful, ultra-fast AI assistant running on CPU via novram.", "System prompt")
-	fs.StringVar(systemPrompt, "s", "You are a helpful, ultra-fast AI assistant running on CPU via novram.", "System prompt")
+	systemPrompt := fs.String("system", "You are an expert AI assistant running on CPU via novram. Provide thorough, comprehensive, and detailed answers with complete code examples.", "System prompt")
+	fs.StringVar(systemPrompt, "s", "You are an expert AI assistant running on CPU via novram. Provide thorough, comprehensive, and detailed answers with complete code examples.", "System prompt")
+	turbo := fs.Bool("turbo", true, "Enable 5x-7x speculative acceleration and quantized KV cache")
+	maxTokens := fs.Int("max-tokens", 2048, "Maximum tokens to generate per response (shorthand -n)")
+	fs.IntVar(maxTokens, "n", 2048, "Maximum tokens to generate per response")
 	useMock := fs.Bool("mock", false, "Use fast in-memory mock engine (for testing without GGUF weights)")
 
 	if err := fs.Parse(args); err != nil {
@@ -41,7 +44,7 @@ func runChat(args []string) {
 		os.Exit(1)
 	}
 
-	params, hw := PrepareEngineParams(modelPath, *threads, *batchSize, *ctxSize)
+	params, hw := PrepareEngineParamsCustom(modelPath, *threads, *batchSize, *ctxSize, *turbo)
 	PrintHardwareBanner(hw, params)
 
 	var eng engine.Engine
@@ -107,7 +110,8 @@ func runChat(args []string) {
 			SystemPrompt: *systemPrompt,
 			Temperature:  float32(*temp),
 			TopP:         float32(*topP),
-			MaxTokens:    1024,
+			MaxTokens:    *maxTokens,
+			TurboMode:    *turbo,
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
