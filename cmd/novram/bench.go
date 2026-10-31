@@ -8,14 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
 )
 
 func runBench(args []string) {
 	fs := flag.NewFlagSet("bench", flag.ExitOnError)
-	modelPath := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
-	fs.StringVar(modelPath, "m", "", "Path to GGUF model file")
+	modelPathFlag := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
+	fs.StringVar(modelPathFlag, "m", "", "Path to GGUF model file")
 	threads := fs.Int("threads", 0, "Number of inference threads (default: physical cores)")
 	fs.IntVar(threads, "t", 0, "Number of inference threads")
 	tokens := fs.Int("tokens", 128, "Number of tokens to generate for benchmark")
@@ -26,35 +25,29 @@ func runBench(args []string) {
 		os.Exit(1)
 	}
 
-	hw := cpu.Detect()
-	if *threads <= 0 {
-		*threads = hw.PhysicalCores
+	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock || *modelPathFlag == "")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
+
+	params, hw := PrepareEngineParams(modelPath, *threads, 0, 4096)
 
 	fmt.Print(Banner)
 	fmt.Println("⚡ NOVRAM CPU BENCHMARK TOOL")
 	fmt.Println("================================================================================")
 	fmt.Printf("• CPU:             %s\n", hw.ModelName)
 	fmt.Printf("• Vector Flags:    %s\n", hw.VectorSummary())
-	fmt.Printf("• Threads:         %d physical cores\n", *threads)
+	fmt.Printf("• Threads:         %d physical cores\n", params.Threads)
 	fmt.Printf("• Target Tokens:   %d\n", *tokens)
 	fmt.Println("================================================================================")
 
 	var eng engine.Engine
-	if *useMock || *modelPath == "" {
+	if *useMock || *modelPathFlag == "" {
 		eng = engine.NewMockEngine()
 		fmt.Println("[Bench] Running with in-memory engine benchmark...")
 	} else {
 		eng = engine.NewLlamaEngine()
-	}
-
-	params := engine.ModelParams{
-		ModelPath:   *modelPath,
-		Threads:     *threads,
-		UseMmap:     true,
-		BatchSize:   cpu.RecommendedBatchSize(hw),
-		ContextSize: 4096,
-		PinCores:    true,
 	}
 
 	t0 := time.Now()

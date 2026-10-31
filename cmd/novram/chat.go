@@ -10,14 +10,14 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
+	"github.com/novram-project/novram/internal/pathutil"
 )
 
 func runChat(args []string) {
 	fs := flag.NewFlagSet("chat", flag.ExitOnError)
-	modelPath := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
-	fs.StringVar(modelPath, "m", "", "Path to GGUF model file")
+	modelPathFlag := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
+	fs.StringVar(modelPathFlag, "m", "", "Path to GGUF model file")
 	threads := fs.Int("threads", 0, "Number of inference threads (default: physical CPU cores)")
 	fs.IntVar(threads, "t", 0, "Number of inference threads")
 	ctxSize := fs.Int("ctx", 4096, "Context window length (shorthand -c)")
@@ -35,27 +35,14 @@ func runChat(args []string) {
 		os.Exit(1)
 	}
 
-	if *modelPath == "" && !*useMock {
-		fmt.Println("Error: --model <path-to-model.gguf> is required (or use --mock for testing).")
-		fmt.Println("Example: novram chat --model ./models/llama-3.2-3b.Q4_K_M.gguf")
+	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	hw := cpu.Detect()
-
-	// Default threads strictly to physical core count
-	if *threads <= 0 {
-		*threads = hw.PhysicalCores
-	}
-	if *batchSize <= 0 {
-		*batchSize = cpu.RecommendedBatchSize(hw)
-	}
-
-	fmt.Print(Banner)
-	fmt.Printf("[CPU] Detected: %s\n", hw.ModelName)
-	fmt.Printf("[CPU] Topology: %d physical cores / %d logical threads | Vector: %s\n",
-		hw.PhysicalCores, hw.LogicalThreads, hw.VectorSummary())
-	fmt.Printf("[CPU] Cache: L3 %d KB | Batch Size: %d\n", hw.L3CacheKB, *batchSize)
+	params, hw := PrepareEngineParams(modelPath, *threads, *batchSize, *ctxSize)
+	PrintHardwareBanner(hw, params)
 
 	var eng engine.Engine
 	if *useMock {
@@ -63,15 +50,6 @@ func runChat(args []string) {
 		fmt.Println("[Engine] Running in MOCK SIMULATION mode (for tests & demonstration)")
 	} else {
 		eng = engine.NewLlamaEngine()
-	}
-
-	params := engine.ModelParams{
-		ModelPath:   *modelPath,
-		Threads:     *threads,
-		UseMmap:     true,
-		BatchSize:   *batchSize,
-		ContextSize: *ctxSize,
-		PinCores:    true,
 	}
 
 	fmt.Printf("[Engine] Loading model with %d threads (physical cores), mmap=true, n_batch=%d...\n",
@@ -103,7 +81,8 @@ func runChat(args []string) {
 			break
 		}
 
-		line := strings.TrimSpace(scanner.Text())
+		rawLine := scanner.Text()
+		line := strings.TrimSpace(pathutil.NormalizeNewlines(rawLine))
 		if line == "" {
 			continue
 		}

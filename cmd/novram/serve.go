@@ -5,15 +5,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
 	"github.com/novram-project/novram/internal/server"
 )
 
 func runServe(args []string) {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	modelPath := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
-	fs.StringVar(modelPath, "m", "", "Path to GGUF model file")
+	modelPathFlag := fs.String("model", "", "Path to GGUF model file (shorthand -m)")
+	fs.StringVar(modelPathFlag, "m", "", "Path to GGUF model file")
 	port := fs.Int("port", 8080, "HTTP server port (shorthand -p)")
 	fs.IntVar(port, "p", 8080, "HTTP server port")
 	host := fs.String("host", "0.0.0.0", "HTTP server host address")
@@ -30,24 +29,14 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
-	if *modelPath == "" && !*useMock {
-		fmt.Println("Error: --model <path-to-model.gguf> is required (or use --mock for testing).")
-		fmt.Println("Example: novram serve --model ./models/llama-3.2-3b.Q4_K_M.gguf --port 8080")
+	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	hw := cpu.Detect()
-	if *threads <= 0 {
-		*threads = hw.PhysicalCores
-	}
-	if *batchSize <= 0 {
-		*batchSize = cpu.RecommendedBatchSize(hw)
-	}
-
-	fmt.Print(Banner)
-	fmt.Printf("[CPU] Detected: %s\n", hw.ModelName)
-	fmt.Printf("[CPU] Binding inference strictly to %d physical cores (Vector: %s)\n", *threads, hw.VectorSummary())
-	fmt.Printf("[CPU] Prompt batch size: %d | L3 Cache: %d KB\n", *batchSize, hw.L3CacheKB)
+	params, hw := PrepareEngineParams(modelPath, *threads, *batchSize, *ctxSize)
+	PrintHardwareBanner(hw, params)
 
 	var eng engine.Engine
 	if *useMock {
@@ -55,15 +44,6 @@ func runServe(args []string) {
 		fmt.Println("[Engine] Running in MOCK SIMULATION mode (for tests & demonstration)")
 	} else {
 		eng = engine.NewLlamaEngine()
-	}
-
-	params := engine.ModelParams{
-		ModelPath:   *modelPath,
-		Threads:     *threads,
-		UseMmap:     true,
-		BatchSize:   *batchSize,
-		ContextSize: *ctxSize,
-		PinCores:    true,
 	}
 
 	if err := eng.Load(params); err != nil {

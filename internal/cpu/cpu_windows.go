@@ -9,9 +9,10 @@ import (
 )
 
 var (
-	modKernel32                       = syscall.NewLazyDLL("kernel32.dll")
-	procGlobalMemoryStatusEx          = modKernel32.NewProc("GlobalMemoryStatusEx")
-	procGetLogicalProcessorInfo       = modKernel32.NewProc("GetLogicalProcessorInformation")
+	modKernel32                 = syscall.NewLazyDLL("kernel32.dll")
+	procGlobalMemoryStatusEx    = modKernel32.NewProc("GlobalMemoryStatusEx")
+	procGetLogicalProcessorInfo = modKernel32.NewProc("GetLogicalProcessorInformation")
+	procGetSystemInfo           = modKernel32.NewProc("GetSystemInfo")
 )
 
 type memoryStatusEx struct {
@@ -41,6 +42,20 @@ type systemLogicalProcessorInformation struct {
 	data          [16]byte
 }
 
+type systemInfo struct {
+	wProcessorArchitecture      uint16
+	wReserved                   uint16
+	dwPageSize                  uint32
+	lpMinimumApplicationAddress uintptr
+	lpMaximumApplicationAddress uintptr
+	dwActiveProcessorMask       uintptr
+	dwNumberOfProcessors        uint32
+	dwProcessorType             uint32
+	dwAllocationGranularity     uint32
+	wProcessorLevel             uint16
+	wProcessorRevision          uint16
+}
+
 const (
 	relationProcessorCore = 0
 	relationCache         = 2
@@ -58,7 +73,6 @@ func detectOS(info *Info) {
 
 	// 2. Physical cores and cache via GetLogicalProcessorInformation
 	var returnLength uint32
-	// First call to determine required buffer size
 	procGetLogicalProcessorInfo.Call(0, uintptr(unsafe.Pointer(&returnLength)))
 	if returnLength > 0 {
 		buf := make([]byte, returnLength)
@@ -87,6 +101,17 @@ func detectOS(info *Info) {
 			if physicalCores > 0 {
 				info.PhysicalCores = physicalCores
 			}
+		}
+	}
+
+	// 3. Fallback: if physical cores could not be determined, use GetSystemInfo
+	if info.PhysicalCores <= 0 {
+		var sysInfo systemInfo
+		procGetSystemInfo.Call(uintptr(unsafe.Pointer(&sysInfo)))
+		if sysInfo.dwNumberOfProcessors > 1 {
+			info.PhysicalCores = int(sysInfo.dwNumberOfProcessors / 2)
+		} else {
+			info.PhysicalCores = 1
 		}
 	}
 }
