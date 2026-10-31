@@ -1,0 +1,17 @@
+# Binaries and build artifacts
+/novram
+/novram.exe
+bin/
+dist/
+
+# Large model weights
+models/
+*.gguf
+*.bin
+
+# OS & IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

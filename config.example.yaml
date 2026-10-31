@@ -1,0 +1,38 @@
+# novram configuration file (config.example.yaml)
+# Run with default config or pass flags directly to the CLI
+
+# Path to the quantized GGUF model file
+model: "./models/llama-3.2-3b-instruct-q4_k_m.gguf"
+
+# Hardware and CPU optimization settings
+engine:
+  # Threads for CPU matrix multiplication
+  # Set to 0 to automatically detect and bind strictly to physical CPU cores (recommended)
+  threads: 0
+
+  # Prompt processing batch size
+  # Tuned for L3 cache locality (512 for >=16MB L3, 256 for <16MB)
+  batch_size: 512
+
+  # Context length in tokens
+  context_size: 4096
+
+  # Zero-copy memory mapping for sub-second model load times
+  use_mmap: true
+
+  # Pin inference worker threads to physical core IDs to avoid cache migrations
+  pin_cores: true
+
+# OpenAI-compatible micro-server configuration (novram serve)
+server:
+  host: "0.0.0.0"
+  port: 8080
+  cors_allowed_origins:
+    - "*"
+
+# Generation and sampling defaults
+sampling:
+  temperature: 0.7
+  top_p: 0.9
+  max_tokens: 2048
+  system_prompt: "You are a fast, helpful AI assistant running on CPU via novram."
