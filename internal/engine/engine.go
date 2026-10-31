@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"time"
 
 	"github.com/novram-project/novram/internal/cpu"
@@ -92,12 +91,7 @@ type Engine interface {
 	Close() error
 }
 
-// GetProcessMemoryUsage returns the current working set / RSS RAM usage of the current process.
-func GetProcessMemoryUsage() uint64 {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	return m.Sys
-}
+
 
 // CalculateStats derives tokens/sec and latency figures from token timestamps.
 func CalculateStats(promptTokens, completionTokens int, start, firstToken, end time.Time) GenStats {

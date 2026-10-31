@@ -1,16 +1,25 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
 )
+
+var bufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 // Server handles HTTP API requests.
 type Server struct {
@@ -151,11 +160,13 @@ func (s *Server) streamResponse(w http.ResponseWriter, ctx context.Context, reqI
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
+	created := time.Now().Unix()
+
 	// 1. Initial role chunk
 	initialChunk := ChatCompletionChunk{
 		ID:      reqID,
 		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
+		Created: created,
 		Model:   modelName,
 		Choices: []ChunkChoice{
 			{
@@ -169,29 +180,14 @@ func (s *Server) streamResponse(w http.ResponseWriter, ctx context.Context, reqI
 	}
 	sendSSEChunk(w, flusher, initialChunk)
 
-	// 2. Stream token chunks
+	// 2. Stream token chunks with pooled buffer
 	_, err := s.engine.Generate(ctx, genParams, func(token string) bool {
-		chunk := ChatCompletionChunk{
-			ID:      reqID,
-			Object:  "chat.completion.chunk",
-			Created: time.Now().Unix(),
-			Model:   modelName,
-			Choices: []ChunkChoice{
-				{
-					Index: 0,
-					Delta: ChunkDelta{
-						Content: token,
-					},
-					FinishReason: nil,
-				},
-			},
-		}
-		sendSSEChunk(w, flusher, chunk)
+		sendSSEToken(w, flusher, reqID, modelName, created, token)
 		return true
 	})
 
 	if err != nil && ctx.Err() == nil {
-		// Log generation error if client didn't disconnect
+		// Client remains connected but generation failed
 	}
 
 	// 3. Final stop chunk
@@ -199,7 +195,7 @@ func (s *Server) streamResponse(w http.ResponseWriter, ctx context.Context, reqI
 	finalChunk := ChatCompletionChunk{
 		ID:      reqID,
 		Object:  "chat.completion.chunk",
-		Created: time.Now().Unix(),
+		Created: created,
 		Model:   modelName,
 		Choices: []ChunkChoice{
 			{
@@ -255,6 +251,26 @@ func (s *Server) nonStreamResponse(w http.ResponseWriter, ctx context.Context, r
 	json.NewEncoder(w).Encode(resp)
 }
 
+func sendSSEToken(w http.ResponseWriter, flusher http.Flusher, reqID, modelName string, created int64, token string) {
+	escapedToken, _ := json.Marshal(token)
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+
+	buf.WriteString("data: {\"id\":")
+	buf.WriteString(strconv.Quote(reqID))
+	buf.WriteString(",\"object\":\"chat.completion.chunk\",\"created\":")
+	buf.WriteString(strconv.FormatInt(created, 10))
+	buf.WriteString(",\"model\":")
+	buf.WriteString(strconv.Quote(modelName))
+	buf.WriteString(",\"choices\":[{\"index\":0,\"delta\":{\"content\":")
+	buf.Write(escapedToken)
+	buf.WriteString("},\"finish_reason\":null}]}\n\n")
+
+	w.Write(buf.Bytes())
+	flusher.Flush()
+}
+
 func sendSSEChunk(w http.ResponseWriter, flusher http.Flusher, chunk ChatCompletionChunk) {
 	data, err := json.Marshal(chunk)
 	if err == nil {
@@ -263,9 +279,15 @@ func sendSSEChunk(w http.ResponseWriter, flusher http.Flusher, chunk ChatComplet
 	}
 }
 
-// formatChatML wraps chat messages in standard ChatML prompt delimiters.
+// formatChatML wraps chat messages in standard ChatML prompt delimiters with pre-allocated buffer.
 func formatChatML(messages []ChatMessage) string {
+	totalLen := 32
+	for _, m := range messages {
+		totalLen += len(m.Role) + len(m.Content) + 24
+	}
+
 	var sb strings.Builder
+	sb.Grow(totalLen)
 	for _, m := range messages {
 		sb.WriteString("<|im_start|>")
 		sb.WriteString(m.Role)
