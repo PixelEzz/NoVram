@@ -26,16 +26,17 @@ func main() {
 
 	cmd := os.Args[1]
 	args := os.Args[2:]
-
 	switch cmd {
 	case "chat":
 		runChat(args)
-	case "serve":
+	case "serve", "proxy", "intercept":
 		runServe(args)
 	case "doctor":
 		runDoctor(args)
 	case "bench":
 		runBench(args)
+	case "recommend":
+		runRecommend(args)
 	case "version", "--version", "-v":
 		fmt.Printf("novram version %s (cpu-only)\n", Version)
 	case "help", "--help", "-h":
@@ -52,10 +53,11 @@ func printHelp() {
 	fmt.Println("USAGE:")
 	fmt.Println("  novram <command> [options]")
 	fmt.Println("\nCOMMANDS:")
-	fmt.Println("  chat    Start an interactive terminal chat session with live tok/s stats")
-	fmt.Println("  serve   Launch an OpenAI-compatible micro-server (/v1/chat/completions)")
-	fmt.Println("  doctor  Inspect CPU vector flags, RAM, and recommend optimal GGUF quantization")
-	fmt.Println("  bench   Benchmark raw prompt evaluation and token generation on CPU")
-	fmt.Println("  version Print novram version")
+	fmt.Println("  chat       Start an interactive terminal chat session with live tok/s stats")
+	fmt.Println("  serve      Launch OpenAI micro-server & interceptor proxy (aliases: proxy, intercept)")
+	fmt.Println("  recommend  Query optimizer interceptor for the best CPU model & quantization")
+	fmt.Println("  doctor     Inspect CPU vector flags, RAM, and recommend optimal GGUF quantization")
+	fmt.Println("  bench      Benchmark raw prompt evaluation and token generation on CPU")
+	fmt.Println("  version    Print novram version")
 	fmt.Println("\nRUN 'novram <command> --help' FOR MORE INFORMATION ON A SPECIFIC COMMAND.")
 }

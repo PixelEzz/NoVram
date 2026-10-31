@@ -35,15 +35,49 @@ Running modern quantized GGUF models on consumer laptops, mini-PCs, and commodit
 
 ---
 
-## 🚀 Key Features
-
+- **Optimizer Interceptor & Model Recommender:** Sits between your IDE extensions and the CPU engine. Users can request ANY model name (e.g., `gpt-4o`, `claude-3-5-sonnet`, `deepseek-r1`, `qwen-coder`); `novram` intercepts the request, checks host RAM & vector units, and recommends/routes to the optimal GGUF quantization with a **zero-swap guarantee**.
 - **Strict Physical Core Affinity:** Automatically discovers physical CPU cores vs. logical hyperthreads. Defaults worker threads strictly to `num_physical_cores` to maximize CPU cache locality and prevent memory bus contention.
 - **Zero-Copy Memory-Mapping (`mmap`):** Maps GGUF weights directly into virtual memory space in sub-100ms load times with zero redundant heap copies.
 - **L3 Cache-Aware Batch Tuning:** Automatically tunes prompt evaluation batch sizes (`n_batch`, default: 512) to match host L3 cache capacity, preventing cache line spills during prompt ingestion.
-- **Hardware Auto-Tuner (`novram doctor`):** 100% native hardware diagnostics inspecting host CPU instruction sets (AVX2, AVX-512, NEON), cache hierarchy, and available RAM to recommend the exact optimal GGUF quantization (e.g. `Q4_K_M` vs `IQ3_M`) and context size with a **zero-swap guarantee**.
+- **Hardware Auto-Tuner (`novram doctor`):** 100% native hardware diagnostics inspecting host CPU instruction sets (AVX2, AVX-512, NEON), cache hierarchy, and available RAM to recommend the exact optimal GGUF quantization (e.g. `Q4_K_M` vs `IQ3_M`) and context size.
 - **Interactive Terminal Chat:** Real-time token streaming to `stdout` with clean ANSI formatting and a live telemetry readout: `[35.2 tok/s | TTFT: 30ms | RAM: 1.4 GB]`.
-- **OpenAI-Compatible Micro-Server:** Exposes `/v1/chat/completions` (with Server-Sent Events SSE streaming) and `/v1/models` with CORS enabled for instant drop-in compatibility with **Roo Code**, **Cline**, **Continue**, and **Cursor**.
+- **OpenAI-Compatible Micro-Server & Proxy:** Exposes `/v1/chat/completions` (with Server-Sent Events SSE streaming) and `/v1/models` with CORS enabled for instant drop-in compatibility with **Roo Code**, **Cline**, **Continue**, and **Cursor**.
 - **Single Standalone Executable:** Distributed as a single self-contained binary with zero external runtime dependencies.
+
+---
+
+## 🧠 The Optimizer Interceptor: How It Works
+
+```text
+ Client (VS Code / Roo Code / Cline)
+                │
+                │ Requests "gpt-4o" or "deepseek-r1"
+                ▼
+   ┌──────────────────────────────────────────────┐
+   │       novram OPTIMIZER INTERCEPTOR           │
+   ├──────────────────────────────────────────────┤
+   │ 1. Intercepts incoming model name & context  │
+   │ 2. Inspects host available RAM & CPU caches  │
+   │ 3. Predicts memory footprint & OOM swap risk │
+   │ 4. Injects optimal quantization & headers    │
+   │ 5. Recommends the highest-throughput model   │
+   └──────────────────────┬───────────────────────┘
+                          │
+                          ▼
+            Physical CPU Core GEMM Engine
+             (Zero Swapping | Peak tok/s)
+```
+
+Clients and IDE extensions can request **any model name** they want. `novram` intercepts the request, matches it against its model knowledge catalog, and evaluates host physical memory in real time:
+
+- If the requested model will cause RAM exhaustion (>80% available RAM), the interceptor flags a `SWAP_WARNING` and recommends a lighter high-efficiency model (e.g. recommending `deepseek-r1-1.5b-Q4_K_M` when `gpt-4o` exceeds host memory).
+- Injects diagnostic headers into HTTP responses:
+  - `X-Novram-Interception: optimized`
+  - `X-Novram-Host-CPU: AMD Ryzen 5 5600H (6 cores, AVX2, FMA)`
+  - `X-Novram-Recommended-Model: deepseek-r1-1.5b`
+  - `X-Novram-Recommended-Quant: Q4_K_M`
+  - `X-Novram-Safety-Status: SAFE`
+  - `X-Novram-Recommendation-Note: Running deepseek-r1-1.5b seamlessly within 3.4 GB available RAM.`
 
 ---
 
@@ -133,7 +167,47 @@ Legend: 🟢 OPTIMAL (Zero swap, peak tok/s) | 🟡 TIGHT (Close other apps) | �
 
 ---
 
-### 2. `novram chat` — Interactive Terminal Chat
+### 2. `novram recommend` — Query Optimizer Interceptor
+
+Ask `novram` what local CPU model and quantization is optimal for your hardware when you have a specific target model or task in mind:
+
+```bash
+# Query best fit for Claude / GPT-4o coding workflows
+novram recommend gpt-4o
+
+# Query reasoning models (e.g. DeepSeek-R1)
+novram recommend deepseek-r1
+
+# Query specific open-weight architectures
+novram recommend qwen-coder
+```
+
+**Example Output:**
+```text
+🧠 NOVRAM OPTIMIZER INTERCEPTOR — MODEL RECOMMENDATION
+================================================================================
+• Host CPU:             AMD Ryzen 5 5600H (6 physical cores, AVX2, FMA)
+• Available Memory:     3.44 GB (Total: 15.34 GB)
+• Requested Model:      deepseek-r1
+--------------------------------------------------------------------------------
+• Recommended Model:    deepseek-r1-1.5b
+• Optimal Quantization: Q4_K_M (Zero-Swap Guarantee)
+• Recommended Context:  4096 tokens
+• Estimated CPU Speed:  ~32.0 tokens/sec
+• Memory Working Set:   1.71 GB
+• Feasibility Status:   [SAFE]
+• Interceptor Note:     Running deepseek-r1-1.5b (Q4_K_M) seamlessly within 3.44 GB available RAM.
+================================================================================
+📥 DOWNLOAD URL:
+   https://huggingface.co/bartowski/DeepSeek-R1-Distill-Qwen-1.5B-GGUF
+
+🚀 RUN WITH OPTIMAL SETTINGS:
+   novram chat --model ./models/deepseek-r1-1.5b-Q4_K_M.gguf --threads 6 --ctx 4096
+```
+
+---
+
+### 3. `novram chat` — Interactive Terminal Chat
 
 Launch a live interactive terminal chat session with instant token streaming and real-time speed readout:
 
@@ -158,12 +232,12 @@ novram chat --mock
 
 ---
 
-### 3. `novram serve` — OpenAI-Compatible Micro-Server
+### 4. `novram serve` (or `novram proxy`) — OpenAI-Compatible Micro-Server & Interceptor
 
-Boots an ultra-lightweight HTTP micro-server exposing `/v1/chat/completions` (with Server-Sent Events SSE streaming) and `/v1/models`:
+Boots an ultra-lightweight HTTP micro-server and optimizer interceptor exposing `/v1/chat/completions` (with Server-Sent Events SSE streaming) and `/v1/models`:
 
 ```bash
-# Launch on default port 8080
+# Launch on default port 8080 (aliases: novram proxy, novram intercept)
 novram serve --model ./models/llama-3.2-3b.Q4_K_M.gguf --port 8080
 
 # Launch in-memory demo server
@@ -172,7 +246,7 @@ novram serve --mock --port 8080
 
 ---
 
-### 4. `novram bench` — CPU Inference Benchmark
+### 5. `novram bench` — CPU Inference Benchmark
 
 Benchmarks raw prompt evaluation and token generation speed on the host CPU:
 

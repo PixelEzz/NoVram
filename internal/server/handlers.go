@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
+	"github.com/novram-project/novram/internal/interceptor"
 )
 
 var bufPool = sync.Pool{
@@ -53,6 +55,7 @@ func (s *Server) cors(next http.HandlerFunc) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With, Accept")
+		w.Header().Set("Access-Control-Expose-Headers", "X-Novram-Interception, X-Novram-Recommended-Model, X-Novram-Recommended-Quant, X-Novram-Safety-Status, X-Novram-Recommendation-Note")
 		w.Header().Set("Access-Control-Max-Age", "86400")
 
 		if r.Method == http.MethodOptions {
@@ -75,16 +78,30 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		modelID = "novram-cpu-model"
 	}
 
-	resp := ModelListResponse{
-		Object: "list",
-		Data: []ModelItem{
-			{
-				ID:      modelID,
+	data := []ModelItem{
+		{
+			ID:      modelID,
+			Object:  "model",
+			Created: time.Now().Unix(),
+			OwnedBy: "novram",
+		},
+	}
+
+	// Add catalog models for IDE dropdowns
+	for _, m := range interceptor.Catalog {
+		if m.ID != modelID {
+			data = append(data, ModelItem{
+				ID:      m.ID,
 				Object:  "model",
 				Created: time.Now().Unix(),
-				OwnedBy: "novram",
-			},
-		},
+				OwnedBy: "novram-catalog",
+			})
+		}
+	}
+
+	resp := ModelListResponse{
+		Object: "list",
+		Data:   data,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -124,6 +141,22 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "messages array cannot be empty", http.StatusBadRequest)
 		return
 	}
+
+	// Interceptor Optimization Layer:
+	// Evaluates the requested model against host hardware and injects optimization telemetry
+	hw := cpu.Detect()
+	decision := interceptor.InterceptAndOptimize(hw, req.Model, req.MaxTokens)
+
+	w.Header().Set("X-Novram-Interception", "optimized")
+	w.Header().Set("X-Novram-Host-CPU", hw.ModelName)
+	w.Header().Set("X-Novram-Requested-Model", req.Model)
+	w.Header().Set("X-Novram-Recommended-Model", decision.SelectedModel)
+	w.Header().Set("X-Novram-Recommended-Quant", decision.RecommendedQuant)
+	w.Header().Set("X-Novram-Safety-Status", decision.SafetyStatus)
+	w.Header().Set("X-Novram-Recommendation-Note", decision.RecommendationNote)
+
+	log.Printf("[Interceptor] Intercepted '%s' -> Recommended CPU Model: %s (%s) [%s | %.1f tok/s est]",
+		req.Model, decision.SelectedModel, decision.RecommendedQuant, decision.SafetyStatus, decision.EstTokensPerSec)
 
 	// Format prompt using standard ChatML template
 	prompt := formatChatML(req.Messages)
