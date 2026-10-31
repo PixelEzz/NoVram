@@ -1,7 +1,7 @@
 # novram automated installation script for Windows
 $ErrorActionPreference = 'Stop'
 
-$Repo = "novram-project/novram"
+$Repo = "PixelEzz/NoVram"
 $Asset = "novram-windows-amd64.zip"
 $Url = "https://github.com/$Repo/releases/latest/download/$Asset"
 $InstallDir = "$env:LOCALAPPDATA\Programs\novram"

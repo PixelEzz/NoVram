@@ -2,7 +2,7 @@
 # novram automated installation script for Linux and macOS
 set -e
 
-REPO="novram-project/novram"
+REPO="PixelEzz/NoVram"
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"
 
