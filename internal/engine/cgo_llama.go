@@ -4,8 +4,8 @@
 package engine
 
 /*
-#cgo CFLAGS: -O3 -mavx2 -mfma -I.
-#cgo CXXFLAGS: -O3 -mavx2 -mfma -std=c++17 -I.
+#cgo CFLAGS: -O3 -I.
+#cgo CXXFLAGS: -O3 -std=c++17 -I.
 #include "bridge.h"
 
 // Forward declaration of Go export callback

@@ -53,6 +53,8 @@ jobs:
           check-latest: true
 
       - name: Run Unit Tests
+        env:
+          CGO_ENABLED: '0'
         run: go test -v ./...
 
       - name: Compile Standalone novram Binary
