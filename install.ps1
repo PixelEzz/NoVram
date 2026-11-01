@@ -17,6 +17,9 @@ if (-not (Test-Path $InstallDir)) {
 
 Write-Host "==> Extracting to $InstallDir..." -ForegroundColor Cyan
 Expand-Archive -Path $TempZip -DestinationPath $InstallDir -Force
+if (Test-Path "$InstallDir\novram-windows-amd64.exe") {
+    Copy-Item "$InstallDir\novram-windows-amd64.exe" $BinPath -Force
+}
 Remove-Item $TempZip -Force
 
 # Add to user PATH if not present

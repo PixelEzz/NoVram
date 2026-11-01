@@ -45,7 +45,7 @@ endif
 
 TARGET_BINARY := $(BINARY_NAME)$(BINARY_EXT)
 
-.PHONY: all build build-static test doctor bench clean install
+.PHONY: all build build-static dist test doctor bench clean install
 
 all: build
 
@@ -58,6 +58,15 @@ build-static:
 	@echo "==> Building standalone zero-dependency static binary..."
 	CGO_ENABLED=0 $(GO) build $(GO_LDFLAGS) -o $(TARGET_BINARY) $(CMD_DIR)
 	@echo "==> Standalone static build complete: $(TARGET_BINARY)"
+
+dist:
+	@echo "==> Building cross-platform release artifacts..."
+ifeq ($(HOST_OS),windows)
+	powershell -ExecutionPolicy Bypass -File ./build.ps1
+else
+	bash ./build.sh
+endif
+
 
 test:
 	@echo "==> Running cross-platform test suite..."
@@ -75,6 +84,7 @@ clean:
 	@echo "==> Cleaning build artifacts..."
 	@$(RM) $(TARGET_BINARY) novram novram.exe
 	@$(RMDIR) $(BUILD_DIR)
+	@$(RMDIR) dist
 
 install: build
 ifeq ($(HOST_OS),windows)

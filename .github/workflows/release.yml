@@ -10,36 +10,37 @@ permissions:
 
 jobs:
   build-release:
-    name: Build Standalone Binaries
-    runs-on: ${{ matrix.os }}
+    name: Build Standalone Binaries (${{ matrix.goos }}-${{ matrix.goarch }})
+    runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
+          - goos: windows
             goarch: amd64
-            artifact_name: novram-linux-amd64
-            archive_ext: tar.gz
-          - os: ubuntu-latest
-            goos: linux
+            binary_name: novram-windows-amd64.exe
+            archive_name: novram-windows-amd64.zip
+            use_zip: true
+          - goos: linux
+            goarch: amd64
+            binary_name: novram-linux-amd64
+            archive_name: novram-linux-amd64.tar.gz
+            use_zip: false
+          - goos: linux
             goarch: arm64
-            artifact_name: novram-linux-arm64
-            archive_ext: tar.gz
-          - os: windows-latest
-            goos: windows
-            goarch: amd64
-            artifact_name: novram-windows-amd64.exe
-            archive_ext: zip
-          - os: macos-latest
-            goos: darwin
+            binary_name: novram-linux-arm64
+            archive_name: novram-linux-arm64.tar.gz
+            use_zip: false
+          - goos: darwin
             goarch: arm64
-            artifact_name: novram-darwin-arm64
-            archive_ext: tar.gz
-          - os: macos-13
-            goos: darwin
+            binary_name: novram-darwin-arm64
+            archive_name: novram-darwin-arm64.tar.gz
+            use_zip: false
+          - goos: darwin
             goarch: amd64
-            artifact_name: novram-darwin-amd64
-            archive_ext: tar.gz
+            binary_name: novram-darwin-amd64
+            archive_name: novram-darwin-amd64.tar.gz
+            use_zip: false
 
     steps:
       - name: Checkout Source Code
@@ -60,44 +61,54 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: '0'
         run: |
-          go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o dist/${{ matrix.artifact_name }} ./cmd/novram
+          mkdir -p dist
+          go build -ldflags="-s -w -X main.Version=${{ github.ref_name }}" -o dist/${{ matrix.binary_name }} ./cmd/novram
 
-      - name: Package Archives (Linux / macOS)
-        if: matrix.os != 'windows-latest'
+      - name: Package Archives & Checksums
         run: |
           cd dist
-          tar -czf ${{ matrix.artifact_name }}.${{ matrix.archive_ext }} ${{ matrix.artifact_name }}
-          sha256sum ${{ matrix.artifact_name }}.${{ matrix.archive_ext }} > ${{ matrix.artifact_name }}.${{ matrix.archive_ext }}.sha256
-
-      - name: Package Archives (Windows)
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          cd dist
-          Compress-Archive -Path ${{ matrix.artifact_name }} -DestinationPath ${{ matrix.artifact_name }}.zip
-          Get-FileHash -Algorithm SHA256 ${{ matrix.artifact_name }}.zip | ForEach-Object { "$($_.Hash)  $($_.Path | Split-Path -Leaf)" } | Out-File -Encoding utf8 ${{ matrix.artifact_name }}.zip.sha256
+          if [ "${{ matrix.use_zip }}" = "true" ]; then
+            zip -q -9 ${{ matrix.archive_name }} ${{ matrix.binary_name }}
+          else
+            tar -czf ${{ matrix.archive_name }} ${{ matrix.binary_name }}
+          fi
+          sha256sum ${{ matrix.archive_name }} > ${{ matrix.archive_name }}.sha256
+          cd ..
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
-          path: dist/*.*
+          name: ${{ matrix.archive_name }}
+          path: |
+            dist/${{ matrix.archive_name }}
+            dist/${{ matrix.archive_name }}.sha256
 
   publish-github-release:
     name: Publish GitHub Release
     needs: build-release
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
+      - name: Generate Consolidated Checksums
+        run: |
+          cd release-assets
+          sha256sum novram-*.zip novram-*.tar.gz > checksums.txt
+          cat checksums.txt
+          cd ..
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-assets/*
+          files: |
+            release-assets/*
           draft: false
           prerelease: false
           generate_release_notes: true
