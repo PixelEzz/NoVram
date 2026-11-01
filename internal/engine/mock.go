@@ -109,6 +109,7 @@ func (m *MockEngine) Generate(ctx context.Context, params GenParams, onToken fun
 			endIdx = len(responseTokens)
 		}
 
+		stopped := false
 		// Stream the speculative batch of tokens
 		for j := i; j < endIdx; j++ {
 			tok := responseTokens[j]
@@ -122,8 +123,13 @@ func (m *MockEngine) Generate(ctx context.Context, params GenParams, onToken fun
 				acceptedDraftCount++
 			}
 			if !cont {
+				stopped = true
 				break
 			}
+		}
+
+		if stopped {
+			break
 		}
 
 		time.Sleep(stepDelay)

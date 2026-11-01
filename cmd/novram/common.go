@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/novram-project/novram/internal/cpu"
 	"github.com/novram-project/novram/internal/engine"
@@ -10,6 +11,7 @@ import (
 
 // ResolveModelPath normalizes user model paths across Windows, macOS, and Linux,
 // expanding tildes, resolving relative paths, and validating file existence.
+// If rawPath is empty, it attempts to auto-detect a .gguf model in ./models or the current directory.
 func ResolveModelPath(rawPath string, isMock bool) (string, error) {
 	if isMock {
 		if rawPath == "" {
@@ -19,7 +21,11 @@ func ResolveModelPath(rawPath string, isMock bool) (string, error) {
 	}
 
 	if rawPath == "" {
-		return "", fmt.Errorf("--model <path-to-model.gguf> is required (or use --mock for demonstration)")
+		if auto := findLocalGGUF(); auto != "" {
+			fmt.Printf("[Auto-Detect] Found model: %s\n", auto)
+			return auto, nil
+		}
+		return "", fmt.Errorf("no model specified.\n  • Quick test: novram chat --mock (or novram serve --mock)\n  • With model: novram chat --model <path-to-model.gguf>")
 	}
 
 	normPath := pathutil.Normalize(rawPath)
@@ -28,6 +34,17 @@ func ResolveModelPath(rawPath string, isMock bool) (string, error) {
 	}
 
 	return normPath, nil
+}
+
+func findLocalGGUF() string {
+	searchDirs := []string{"models", "."}
+	for _, dir := range searchDirs {
+		matches, err := filepath.Glob(filepath.Join(dir, "*.gguf"))
+		if err == nil && len(matches) > 0 {
+			return matches[0]
+		}
+	}
+	return ""
 }
 
 // PrepareEngineParams configures hardware defaults (physical cores, L3 cache batch size, mmap, turbo mode).

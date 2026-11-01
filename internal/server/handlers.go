@@ -224,35 +224,32 @@ func (s *Server) streamResponse(w http.ResponseWriter, ctx context.Context, reqI
 	sendSSEChunk(w, flusher, initialChunk)
 
 	// 2. Stream token chunks with pooled buffer
-	_, err := s.engine.Generate(ctx, genParams, func(token string) bool {
-		sendSSEToken(w, flusher, reqID, modelName, created, token)
-		return true
+	_, _ = s.engine.Generate(ctx, genParams, func(token string) bool {
+		return sendSSEToken(w, flusher, reqID, modelName, created, token)
 	})
 
-	if err != nil && ctx.Err() == nil {
-		// Client remains connected but generation failed
-	}
-
-	// 3. Final stop chunk
-	stopReason := "stop"
-	finalChunk := ChatCompletionChunk{
-		ID:      reqID,
-		Object:  "chat.completion.chunk",
-		Created: created,
-		Model:   modelName,
-		Choices: []ChunkChoice{
-			{
-				Index:        0,
-				Delta:        ChunkDelta{},
-				FinishReason: &stopReason,
+	// 3. Final stop chunk (if client is still connected)
+	if ctx.Err() == nil {
+		stopReason := "stop"
+		finalChunk := ChatCompletionChunk{
+			ID:      reqID,
+			Object:  "chat.completion.chunk",
+			Created: created,
+			Model:   modelName,
+			Choices: []ChunkChoice{
+				{
+					Index:        0,
+					Delta:        ChunkDelta{},
+					FinishReason: &stopReason,
+				},
 			},
-		},
-	}
-	sendSSEChunk(w, flusher, finalChunk)
+		}
+		sendSSEChunk(w, flusher, finalChunk)
 
-	// 4. SSE sentinel
-	fmt.Fprintf(w, "data: [DONE]\n\n")
-	flusher.Flush()
+		// 4. SSE sentinel
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}
 }
 
 func (s *Server) nonStreamResponse(w http.ResponseWriter, ctx context.Context, reqID, modelName string, genParams engine.GenParams) {
@@ -294,7 +291,7 @@ func (s *Server) nonStreamResponse(w http.ResponseWriter, ctx context.Context, r
 	json.NewEncoder(w).Encode(resp)
 }
 
-func sendSSEToken(w http.ResponseWriter, flusher http.Flusher, reqID, modelName string, created int64, token string) {
+func sendSSEToken(w http.ResponseWriter, flusher http.Flusher, reqID, modelName string, created int64, token string) bool {
 	escapedToken, _ := json.Marshal(token)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
@@ -310,8 +307,11 @@ func sendSSEToken(w http.ResponseWriter, flusher http.Flusher, reqID, modelName 
 	buf.Write(escapedToken)
 	buf.WriteString("},\"finish_reason\":null}]}\n\n")
 
-	w.Write(buf.Bytes())
+	if _, err := w.Write(buf.Bytes()); err != nil {
+		return false
+	}
 	flusher.Flush()
+	return true
 }
 
 func sendSSEChunk(w http.ResponseWriter, flusher http.Flusher, chunk ChatCompletionChunk) {
