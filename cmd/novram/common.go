@@ -37,7 +37,7 @@ func ResolveModelPath(rawPath string, isMock bool) (string, error) {
 }
 
 func findLocalGGUF() string {
-	searchDirs := []string{"models", "."}
+	searchDirs := []string{"test_models", "models", "."}
 	for _, dir := range searchDirs {
 		matches, err := filepath.Glob(filepath.Join(dir, "*.gguf"))
 		if err == nil && len(matches) > 0 {

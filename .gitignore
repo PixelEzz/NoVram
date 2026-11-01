@@ -6,6 +6,7 @@ dist/
 
 # Large model weights
 models/
+test_models/
 *.gguf
 *.bin
 
