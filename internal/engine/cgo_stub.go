@@ -5,85 +5,69 @@ package engine
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sync"
 )
 
-// LlamaEngine provides the zero-dependency pure Go engine implementation when compiled without CGO.
+// LlamaEngine wraps the native CPU BackendEngine for zero-dependency non-CGO builds.
 type LlamaEngine struct {
-	mu     sync.Mutex
-	params ModelParams
-	loaded bool
-	mock   *MockEngine
+	mu      sync.Mutex
+	backend *BackendEngine
+	mock    *MockEngine
+	isMock  bool
 }
 
-// NewLlamaEngine initializes the standalone CPU engine.
+// NewLlamaEngine initializes the standalone CPU engine using the native BackendEngine supervisor.
 func NewLlamaEngine() *LlamaEngine {
 	return &LlamaEngine{
-		mock: NewMockEngine(),
+		backend: NewBackendEngine(),
+		mock:    NewMockEngine(),
 	}
 }
 
-// Load verifies the GGUF model file and maps it into virtual memory address space.
+// Load verifies the GGUF model and starts the native backend runner.
 func (e *LlamaEngine) Load(params ModelParams) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if params.ModelPath != "" && params.ModelPath != "novram-mock-cpu-model" {
-		f, err := os.Open(params.ModelPath)
-		if err != nil {
-			return fmt.Errorf("failed to open model file: %w", err)
-		}
-		defer f.Close()
-
-		var magic [4]byte
-		if n, err := f.Read(magic[:]); err != nil || n < 4 || string(magic[:]) != "GGUF" {
-			return fmt.Errorf("file %s is not a valid GGUF model (header magic: %q)", params.ModelPath, magic)
-		}
+	if params.ModelPath == "novram-mock-cpu-model" {
+		e.isMock = true
+		return e.mock.Load(params)
 	}
 
-	e.params = params
-	e.loaded = true
-	return e.mock.Load(params)
+	e.isMock = false
+	return e.backend.Load(params)
 }
 
+// ModelInfo returns runtime metadata about the model.
 func (e *LlamaEngine) ModelInfo() ModelInfo {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	name := filepath.Base(e.params.ModelPath)
-	if name == "" || name == "." {
-		name = "novram-cpu-model"
+	if e.isMock {
+		return e.mock.ModelInfo()
 	}
-
-	return ModelInfo{
-		Name:        name,
-		Path:        e.params.ModelPath,
-		ContextSize: e.params.ContextSize,
-		BatchSize:   e.params.BatchSize,
-		Threads:     e.params.Threads,
-		UseMmap:     e.params.UseMmap,
-		IsMock:      false,
-	}
+	return e.backend.ModelInfo()
 }
 
+// Generate streams real neural network tokens from the CPU runner.
 func (e *LlamaEngine) Generate(ctx context.Context, params GenParams, onToken func(token string) bool) (GenStats, error) {
 	e.mu.Lock()
-	if !e.loaded {
-		e.mu.Unlock()
-		return GenStats{}, fmt.Errorf("model is not loaded")
-	}
-	mock := e.mock
+	isMock := e.isMock
 	e.mu.Unlock()
 
-	return mock.Generate(ctx, params, onToken)
+	if isMock {
+		return e.mock.Generate(ctx, params, onToken)
+	}
+	return e.backend.Generate(ctx, params, onToken)
 }
 
+// Close terminates the backend process and frees resources.
 func (e *LlamaEngine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.loaded = false
-	return e.mock.Close()
+
+	if e.isMock {
+		return e.mock.Close()
+	}
+	return e.backend.Close()
 }

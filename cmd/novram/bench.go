@@ -26,7 +26,11 @@ func runBench(args []string) {
 		os.Exit(1)
 	}
 
-	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock || *modelPathFlag == "")
+	if *modelPathFlag == "" && fs.NArg() > 0 {
+		*modelPathFlag = fs.Arg(0)
+	}
+
+	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock || (*modelPathFlag == "" && fs.NArg() == 0))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

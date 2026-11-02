@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/novram-project/novram/internal/cpu"
+	"github.com/novram-project/novram/internal/engine"
 )
 
 func runDoctor(args []string) {
@@ -27,6 +28,11 @@ func runDoctor(args []string) {
 	fmt.Printf("• Cache Hierarchy:   L1: %d KB | L2: %d KB | L3: %d KB\n", hw.L1DataCacheKB, hw.L2CacheKB, hw.L3CacheKB)
 	fmt.Printf("• System Memory:     Total: %.2f GB | Currently Available: %.2f GB\n", totalRAMGB, freeRAMGB)
 	fmt.Printf("• Optimal Batch:     n_batch = %d (tuned for host L3 cache capacity)\n", cpu.RecommendedBatchSize(hw))
+	if backendBin := engine.FindBackendBinary(); backendBin != "" {
+		fmt.Printf("• Inference Backend: Installed (%s)\n", backendBin)
+	} else {
+		fmt.Println("• Inference Backend: Auto-provisions on first model execution (~15 MB)")
+	}
 	fmt.Println("================================================================================")
 	fmt.Println("\n📊 GGUF FEASIBILITY & PERFORMANCE MATRIX (Zero-Swap Guarantee):")
 	fmt.Println("--------------------------------------------------------------------------------")

@@ -6,7 +6,7 @@ import (
 )
 
 const (
-	Version = "0.1.1"
+	Version = "0.1.2"
 	Banner  = `
  ███╗   ██╗ ██████╗ ██╗   ██╗██████╗  █████╗ ███╗   ███╗
  ████╗  ██║██╔═══██╗██║   ██║██╔══██╗██╔══██╗████╗ ████║
@@ -26,8 +26,15 @@ func main() {
 
 	cmd := os.Args[1]
 	args := os.Args[2:]
+
+	// Convenience: Direct model file execution, e.g. `novram ./models/llama-3.2-3b.gguf`
+	if len(os.Args) == 2 && (len(cmd) > 5 && cmd[len(cmd)-5:] == ".gguf") {
+		runChat([]string{"--model", cmd})
+		return
+	}
+
 	switch cmd {
-	case "chat":
+	case "chat", "run":
 		runChat(args)
 	case "serve", "proxy", "intercept":
 		runServe(args)

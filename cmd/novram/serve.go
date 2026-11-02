@@ -30,6 +30,10 @@ func runServe(args []string) {
 		os.Exit(1)
 	}
 
+	if *modelPathFlag == "" && fs.NArg() > 0 {
+		*modelPathFlag = fs.Arg(0)
+	}
+
 	modelPath, err := ResolveModelPath(*modelPathFlag, *useMock)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

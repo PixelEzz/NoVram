@@ -64,9 +64,13 @@ curl -L -o models/deepseek-r1-1.5b.Q4_K_M.gguf \
 
 ### Step 3: Run!
 
-#### Option A: Chat in your Terminal
+#### Option A: Single Command Run or Chat
 ```bash
-novram chat --model ./models/llama-3.2-3b.Q4_K_M.gguf
+# Run directly with the model file:
+novram run ./models/llama-3.2-3b.Q4_K_M.gguf
+
+# Or simply:
+novram ./models/llama-3.2-3b.Q4_K_M.gguf
 ```
 *(Tip: Test instantly without downloading any model using `novram chat --mock`)*
 
@@ -174,6 +178,9 @@ Traditional CPU inference runtimes suffer from three fundamental bottlenecks. `n
 
 ### Can I run this on a laptop with integrated graphics (no GPU)?
 **Yes.** `novram` is built specifically for systems without discrete graphics cards or dedicated VRAM. It executes directly across your CPU and system DDR RAM using native SIMD vector extensions (AVX2, AVX-512, ARM NEON).
+
+### Does it run on remote Linux VPSes and cloud dev servers?
+**Yes.** `novram` runs seamlessly on Linux VPSes (Ubuntu, Debian, Fedora, Arch), cloud instances (AMD EPYC, Intel Xeon, ARM Graviton), and Docker dev containers without GPUs. It automatically provisions the high-performance native CPU backend on first run—zero CGO compiler setup, zero manual builds, and zero library dependency hell.
 
 ### What models work best?
 - **4 GB – 8 GB RAM:** `DeepSeek-R1 Distill 1.5B` or `Llama 3.2 1B` (`Q4_K_M`)

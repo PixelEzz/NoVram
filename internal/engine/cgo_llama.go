@@ -26,21 +26,33 @@ import (
 )
 
 type LlamaEngine struct {
-	mu     sync.Mutex
-	handle C.novram_model_handle
-	params ModelParams
-	loaded bool
+	mu      sync.Mutex
+	handle  C.novram_model_handle
+	params  ModelParams
+	loaded  bool
+	backend *BackendEngine
+	mock    *MockEngine
+	mode    int // 0: cgo native, 1: backend supervisor, 2: mock
 }
 
-// NewLlamaEngine creates an instance of the llama.cpp Cgo engine.
+// NewLlamaEngine creates an instance of the CPU engine.
 func NewLlamaEngine() *LlamaEngine {
 	C.novram_backend_init()
-	return &LlamaEngine{}
+	return &LlamaEngine{
+		backend: NewBackendEngine(),
+		mock:    NewMockEngine(),
+	}
 }
 
 func (e *LlamaEngine) Load(params ModelParams) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+
+	if params.ModelPath == "novram-mock-cpu-model" {
+		e.mode = 2
+		e.loaded = true
+		return e.mock.Load(params)
+	}
 
 	cPath := C.CString(params.ModelPath)
 	defer C.free(unsafe.Pointer(cPath))
@@ -53,28 +65,39 @@ func (e *LlamaEngine) Load(params ModelParams) error {
 		C.bool(params.UseMmap),
 	)
 
-	if handle == nil {
-		return fmt.Errorf("failed to load model from path %s: check file existence or build with llama.cpp support", params.ModelPath)
+	if handle != nil {
+		e.handle = handle
+		e.params = params
+		e.mode = 0
+		e.loaded = true
+		return nil
 	}
 
-	e.handle = handle
-	e.params = params
+	// Fallback to native backend supervisor
+	e.mode = 1
 	e.loaded = true
-	return nil
+	return e.backend.Load(params)
 }
 
 func (e *LlamaEngine) ModelInfo() ModelInfo {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	return ModelInfo{
-		Name:        e.params.ModelPath,
-		Path:        e.params.ModelPath,
-		ContextSize: e.params.ContextSize,
-		BatchSize:   e.params.BatchSize,
-		Threads:     e.params.Threads,
-		UseMmap:     e.params.UseMmap,
-		IsMock:      false,
+	switch e.mode {
+	case 2:
+		return e.mock.ModelInfo()
+	case 1:
+		return e.backend.ModelInfo()
+	default:
+		return ModelInfo{
+			Name:        e.params.ModelPath,
+			Path:        e.params.ModelPath,
+			ContextSize: e.params.ContextSize,
+			BatchSize:   e.params.BatchSize,
+			Threads:     e.params.Threads,
+			UseMmap:     e.params.UseMmap,
+			IsMock:      false,
+		}
 	}
 }
 
@@ -120,11 +143,22 @@ func goTokenCallback(token *C.char, userData unsafe.Pointer) C.bool {
 
 func (e *LlamaEngine) Generate(ctx context.Context, params GenParams, onToken func(token string) bool) (GenStats, error) {
 	e.mu.Lock()
-	if !e.loaded || e.handle == nil {
+	if !e.loaded {
 		e.mu.Unlock()
 		return GenStats{}, fmt.Errorf("engine model not loaded")
 	}
+	mode := e.mode
+	handle := e.handle
+	backend := e.backend
+	mock := e.mock
 	e.mu.Unlock()
+
+	switch mode {
+	case 2:
+		return mock.Generate(ctx, params, onToken)
+	case 1:
+		return backend.Generate(ctx, params, onToken)
+	}
 
 	sess := &tokenStreamSession{
 		ctx:     ctx,
@@ -153,7 +187,7 @@ func (e *LlamaEngine) Generate(ctx context.Context, params GenParams, onToken fu
 	}
 
 	ret := C.call_novram_generate(
-		e.handle,
+		handle,
 		cPrompt,
 		C.float(params.Temperature),
 		C.float(params.TopP),
@@ -172,10 +206,18 @@ func (e *LlamaEngine) Generate(ctx context.Context, params GenParams, onToken fu
 func (e *LlamaEngine) Close() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.handle != nil {
-		C.novram_free_model(e.handle)
-		e.handle = nil
-		e.loaded = false
+
+	switch e.mode {
+	case 2:
+		return e.mock.Close()
+	case 1:
+		return e.backend.Close()
+	default:
+		if e.handle != nil {
+			C.novram_free_model(e.handle)
+			e.handle = nil
+			e.loaded = false
+		}
+		return nil
 	}
-	return nil
 }
