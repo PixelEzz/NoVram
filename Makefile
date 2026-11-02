@@ -8,7 +8,7 @@ BUILD_DIR := ./bin
 # Go toolchain
 GO ?= go
 CGO_ENABLED ?= 1
-GO_LDFLAGS := -ldflags="-s -w -X main.Version=0.1.0"
+GO_LDFLAGS := -ldflags="-s -w -X main.Version=0.1.1"
 
 # Detect Host Operating System & Architecture
 ifeq ($(OS),Windows_NT)

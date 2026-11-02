@@ -31,7 +31,7 @@ func (e *LlamaEngine) Load(params ModelParams) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	if params.ModelPath != "" {
+	if params.ModelPath != "" && params.ModelPath != "novram-mock-cpu-model" {
 		f, err := os.Open(params.ModelPath)
 		if err != nil {
 			return fmt.Errorf("failed to open model file: %w", err)
