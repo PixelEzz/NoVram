@@ -2,7 +2,7 @@
 # Generates zero-dependency static binaries and release archives in ./dist
 
 param (
-    [string]$Version = "0.1.2"
+    [string]$Version = "0.1.3"
 )
 
 $ErrorActionPreference = "Stop"

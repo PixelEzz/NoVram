@@ -65,6 +65,21 @@ func (e *BackendEngine) ModelInfo() ModelInfo {
 	}
 }
 
+type safeBufferWriter struct {
+	buf *bytes.Buffer
+	mu  *sync.Mutex
+}
+
+func (w *safeBufferWriter) Write(p []byte) (n int, err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Keep up to 64KB of recent logs to avoid unbounded memory growth
+	if w.buf.Len() > 64*1024 {
+		w.buf.Reset()
+	}
+	return w.buf.Write(p)
+}
+
 // Load verifies the GGUF model, provisions the CPU backend if needed, and boots the supervised runner.
 func (e *BackendEngine) Load(params ModelParams) error {
 	e.mu.Lock()
@@ -78,7 +93,14 @@ func (e *BackendEngine) Load(params ModelParams) error {
 		return fmt.Errorf("no model path provided")
 	}
 
-	// 1. Verify GGUF header magic
+	// 1. Resolve to absolute path so backend running in its own directory can locate weights
+	absModelPath, err := filepath.Abs(params.ModelPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve model path %s: %w", params.ModelPath, err)
+	}
+	params.ModelPath = absModelPath
+
+	// 2. Verify GGUF header magic
 	if err := verifyGGUFHeader(params.ModelPath); err != nil {
 		return err
 	}
@@ -88,13 +110,13 @@ func (e *BackendEngine) Load(params ModelParams) error {
 		e.modelName = "novram-cpu-model"
 	}
 
-	// 2. Ensure native CPU runner binary is available
+	// 3. Ensure native CPU runner binary is available and verified
 	backendBin, err := EnsureBackend()
 	if err != nil {
 		return fmt.Errorf("failed to prepare CPU backend: %w", err)
 	}
 
-	// 3. Allocate free ephemeral localhost port
+	// 4. Allocate free ephemeral localhost port
 	port, err := getFreePort()
 	if err != nil {
 		return fmt.Errorf("failed to allocate local port: %w", err)
@@ -102,7 +124,7 @@ func (e *BackendEngine) Load(params ModelParams) error {
 	e.port = port
 	e.baseURL = fmt.Sprintf("http://127.0.0.1:%d", port)
 
-	// 4. Construct hardware-tuned arguments
+	// 5. Construct hardware-tuned arguments
 	args := []string{
 		"-m", params.ModelPath,
 		"-t", fmt.Sprintf("%d", params.Threads),
@@ -110,7 +132,6 @@ func (e *BackendEngine) Load(params ModelParams) error {
 		"-b", fmt.Sprintf("%d", params.BatchSize),
 		"--host", "127.0.0.1",
 		"--port", fmt.Sprintf("%d", port),
-		"--log-disable",
 	}
 
 	if params.UseMmap {
@@ -134,22 +155,31 @@ func (e *BackendEngine) Load(params ModelParams) error {
 	}
 	cmd.Env = env
 
-	// Suppress raw background engine stdout/stderr to keep CLI clean
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Capture output in thread-safe buffer for instant diagnostics if startup fails
+	var outputBuf bytes.Buffer
+	var bufMu sync.Mutex
+	logWriter := &safeBufferWriter{buf: &outputBuf, mu: &bufMu}
+	cmd.Stdout = logWriter
+	cmd.Stderr = logWriter
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("failed to start backend runner (%s): %w", backendBin, err)
 	}
 	e.cmd = cmd
 
-	// 5. Wait for readiness with timeout
-	readyCtx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	// Track process exit in background goroutine
+	exitChan := make(chan error, 1)
+	go func() {
+		exitChan <- cmd.Wait()
+	}()
+
+	// 6. Wait for readiness (up to 2 minutes for large models on slow storage)
+	readyCtx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	if err := e.waitForReady(readyCtx); err != nil {
+	if err := e.waitForReady(readyCtx, exitChan, &outputBuf, &bufMu); err != nil {
 		_ = e.killProcess()
-		return fmt.Errorf("backend startup timed out: %w", err)
+		return err
 	}
 
 	e.params = params
@@ -158,23 +188,39 @@ func (e *BackendEngine) Load(params ModelParams) error {
 }
 
 // waitForReady polls the backend /health endpoint until it reports ok.
-func (e *BackendEngine) waitForReady(ctx context.Context) error {
+func (e *BackendEngine) waitForReady(ctx context.Context, exitChan <-chan error, outputBuf *bytes.Buffer, bufMu *sync.Mutex) error {
 	healthURL := e.baseURL + "/health"
-	client := &http.Client{Timeout: 500 * time.Millisecond}
+	client := &http.Client{Timeout: 800 * time.Millisecond}
 
-	ticker := time.NewTicker(150 * time.Millisecond)
+	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
+
+	var lastStatus string
+	startTime := time.Now()
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			// Check if process exited prematurely
-			if e.cmd != nil && e.cmd.ProcessState != nil && e.cmd.ProcessState.Exited() {
-				return fmt.Errorf("backend process exited unexpectedly with code %d", e.cmd.ProcessState.ExitCode())
+			bufMu.Lock()
+			logs := outputBuf.String()
+			bufMu.Unlock()
+			trimmed := trimLogs(logs)
+			if trimmed != "" {
+				return fmt.Errorf("backend startup timed out after %v: %w\n--- Backend Output ---\n%s",
+					time.Since(startTime).Round(time.Second), ctx.Err(), trimmed)
 			}
+			return fmt.Errorf("backend startup timed out after %v: %w",
+				time.Since(startTime).Round(time.Second), ctx.Err())
 
+		case err := <-exitChan:
+			bufMu.Lock()
+			logs := outputBuf.String()
+			bufMu.Unlock()
+			trimmed := trimLogs(logs)
+			return fmt.Errorf("backend runner exited unexpectedly (%v)\n--- Backend Error / Stderr ---\n%s",
+				err, trimmed)
+
+		case <-ticker.C:
 			req, err := http.NewRequestWithContext(ctx, "GET", healthURL, nil)
 			if err != nil {
 				continue
@@ -193,8 +239,21 @@ func (e *BackendEngine) waitForReady(ctx context.Context) error {
 			if resp.StatusCode == http.StatusOK && (body.Status == "ok" || body.Status == "") {
 				return nil
 			}
+
+			if body.Status != "" && body.Status != lastStatus {
+				lastStatus = body.Status
+				fmt.Printf("[NoVram] Backend status: %s...\n", body.Status)
+			}
 		}
 	}
+}
+
+func trimLogs(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > 25 {
+		lines = lines[len(lines)-25:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // completionRequest represents the payload sent to llama-server /completion.
@@ -423,10 +482,35 @@ func FindBackendBinary() string {
 	return ""
 }
 
+// testBackendExecutable checks if the binary can execute without failing on missing libraries.
+func testBackendExecutable(binPath string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	binDir := filepath.Dir(binPath)
+	cmd := exec.CommandContext(ctx, binPath, "-h")
+	cmd.Dir = binDir
+	env := os.Environ()
+	if runtime.GOOS == "windows" {
+		env = append(env, "PATH="+binDir+";"+os.Getenv("PATH"))
+	} else if runtime.GOOS == "darwin" {
+		env = append(env, "DYLD_LIBRARY_PATH="+binDir+":"+os.Getenv("DYLD_LIBRARY_PATH"))
+	} else {
+		env = append(env, "LD_LIBRARY_PATH="+binDir+":"+os.Getenv("LD_LIBRARY_PATH"))
+	}
+	cmd.Env = env
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	return cmd.Run()
+}
+
 // EnsureBackend checks for an existing runner binary or auto-downloads the precompiled CPU build.
 func EnsureBackend() (string, error) {
 	if existing := FindBackendBinary(); existing != "" {
-		return existing, nil
+		if err := testBackendExecutable(existing); err == nil {
+			return existing, nil
+		}
+		fmt.Printf("[NoVram] Existing backend binary (%s) failed execution check. Refreshing installation...\n", existing)
 	}
 
 	destDir, err := GetNovramBinDir()
@@ -506,7 +590,6 @@ func downloadAndExtract(url, destDir string, isZip bool) error {
 		return fmt.Errorf("download returned HTTP %d", resp.StatusCode)
 	}
 
-	// Write to temporary archive file
 	tmpFile, err := os.CreateTemp("", "novram-backend-*")
 	if err != nil {
 		return err
@@ -592,6 +675,13 @@ func extractTarGz(tarPath, destDir string) error {
 	defer gzr.Close()
 
 	tr := tar.NewReader(gzr)
+
+	type symlinkInfo struct {
+		linkName   string
+		targetFile string
+	}
+	var symlinks []symlinkInfo
+
 	for {
 		header, err := tr.Next()
 		if errors.Is(err, io.EOF) {
@@ -607,6 +697,15 @@ func extractTarGz(tarPath, destDir string) error {
 		}
 
 		target := filepath.Join(destDir, name)
+
+		if header.Typeflag == tar.TypeSymlink {
+			symlinks = append(symlinks, symlinkInfo{
+				linkName:   target,
+				targetFile: filepath.Base(header.Linkname),
+			})
+			continue
+		}
+
 		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(header.Mode))
 		if err != nil {
 			return err
@@ -622,6 +721,26 @@ func extractTarGz(tarPath, destDir string) error {
 			_ = os.Chmod(target, os.FileMode(header.Mode)|0755)
 		}
 	}
+
+	// Resolve all symlinks (or copy contents if symlink fails or is unsupported)
+	for _, s := range symlinks {
+		_ = os.Remove(s.linkName)
+		source := filepath.Join(destDir, s.targetFile)
+
+		var created bool
+		if runtime.GOOS != "windows" {
+			if err := os.Symlink(s.targetFile, s.linkName); err == nil {
+				created = true
+			}
+		}
+
+		if !created {
+			if data, err := os.ReadFile(source); err == nil {
+				_ = os.WriteFile(s.linkName, data, 0755)
+			}
+		}
+	}
+
 	return nil
 }
 
