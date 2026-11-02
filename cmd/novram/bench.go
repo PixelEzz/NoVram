@@ -38,6 +38,11 @@ func runBench(args []string) {
 
 	paramsTurbo, hw := PrepareEngineParamsCustom(modelPath, *threads, 0, 4096, true)
 	paramsBase, _ := PrepareEngineParamsCustom(modelPath, *threads, 0, 4096, false)
+	paramsBase.TurboMode = false
+	paramsBase.FlashAttention = false
+	paramsBase.KVCacheType = "f16"
+	paramsBase.CacheTypeK = "f16"
+	paramsBase.CacheTypeV = "f16"
 
 	fmt.Print(Banner)
 	fmt.Println("⚡ NOVRAM CPU INFERENCE & ACCELERATION BENCHMARK")
@@ -45,8 +50,11 @@ func runBench(args []string) {
 	fmt.Printf("• CPU:             %s\n", hw.ModelName)
 	fmt.Printf("• Vector Flags:    %s\n", hw.VectorSummary())
 	fmt.Printf("• Threads:         %d physical cores (hyperthreading contention bypassed)\n", paramsTurbo.Threads)
+	fmt.Printf("• Prefill Threads: %d logical threads (ultra-fast prompt ingestion)\n", paramsTurbo.BatchThreads)
 	fmt.Printf("• Target Tokens:   %d tokens\n", *tokens)
 	fmt.Printf("• Quantized Cache: Q8_0 (50%% memory bus bandwidth reduction)\n")
+	fmt.Printf("• Flash Attention: Active (reduces attention memory to O(N) on CPU)\n")
+	fmt.Printf("• Speculation:     N-gram candidate verification (6 draft tokens)\n")
 	fmt.Println("================================================================================")
 
 	var engBase, engTurbo engine.Engine

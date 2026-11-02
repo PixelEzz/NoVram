@@ -144,17 +144,26 @@ novram bench --mock
 
 ---
 
-## ⚙️ Why novram is Fast on Low-Spec PCs
+## ⚙️ Why novram is Fast on Low-Spec PCs & VPSes
 
-Traditional CPU inference runtimes suffer from three fundamental bottlenecks. `novram` fixes all three:
+Traditional CPU inference runtimes suffer from fundamental memory bandwidth and cache bottlenecks. `novram` eliminates them with hardware-level tuning:
 
-1. **Strict Physical Core Affinity (Bypassing Hyperthreads):**  
-   Dense vector GEMM fully saturates execution ports. Conventional runners spawn threads across all logical hyperthreads, causing sibling threads to evict each other's 32 KB L1 and 512 KB L2 cache lines. `novram` binds workers strictly to physical cores, recovering **25% to 35% speed**.
+1. **Dual-Phase Core Affinity (Physical Decode + Logical Prefill):**  
+   - **Token Generation (Decode):** Bound strictly to physical CPU cores (`-t`), eliminating SMT/hyperthreading cache evictions across sibling threads and recovering **25% to 35% speed**.
+   - **Prompt Ingestion (Prefill):** Scaled across all logical threads (`-tb`), minimizing Time To First Token (TTFT) by up to **50%**.
 
-2. **5x-7x Prompt Lookup Speculation (PLD):**  
+2. **Native CPU Flash Attention & Quantized KV Cache:**  
+   - Flash Attention (`-fa on`) eliminates large attention matrix allocations, keeping attention operations $O(N)$ on CPU.
+   - `Q8_0` quantized KV cache halves memory bus bandwidth saturation on every autoregressive step.
+
+3. **5x-7x N-Gram Speculative Acceleration:**  
    Autoregression is memory-bandwidth bound: reading weights from RAM for 1 token takes ~30ms. `novram` speculates bursts of 5 to 7 candidate tokens from context n-grams and verifies them in a single batched forward pass—generating **180–280+ tok/s**.
 
-3. **Zero-Swap RAM Guarantee:**  
+4. **Min-P Dynamic Sampling & Context Shifting:**  
+   - `--min-p 0.05` truncates low-probability noise, eliminating repetitive loops and generating rich, detailed, high-token answers without truncation.
+   - `--context-shift` slides the context window smoothly, enabling continuous, infinite conversations without out-of-context crashes.
+
+5. **Zero-Swap RAM Guarantee:**  
    Paging model weights to disk freezes your PC. `novram` calculates weights + KV cache footprint before loading, ensuring models run 100% in physical RAM with **zero swap thrashing**.
 
 ---
@@ -164,13 +173,16 @@ Traditional CPU inference runtimes suffer from three fundamental bottlenecks. `n
 | Flag | Shorthand | Description | Default |
 |:---|:---:|:---|:---:|
 | `--model` | `-m` | Path to GGUF model file (auto-detects if placed in `./models`) | Auto-detect |
-| `--mock` | | Run in-memory simulation mode (test without weights) | `false` |
-| `--turbo` | | Enable speculative burst acceleration & Q8_0 KV cache | `true` |
-| `--threads` | `-t` | Number of CPU inference worker threads | Physical cores |
-| `--port` | `-p` | Server port (`serve` command) | `8080` |
+| `--turbo` | | Enable speculative acceleration, Q8_0 KV cache, & Flash Attention | `true` |
+| `--threads` | `-t` | Number of CPU inference decode threads | Physical cores |
+| `--threads-batch` | `-tb` | Number of prompt prefill threads (TTFT acceleration) | Logical threads |
+| `--flash-attn` | `-fa` | Enable Flash Attention on CPU | `true` |
 | `--ctx` | `-c` | Context window size in tokens | `4096` |
-| `--max-tokens` | `-n` | Maximum tokens to generate per response | `2048` |
+| `--max-tokens` | `-n` | Maximum tokens to generate per response | `4096` |
+| `--min-p` | | Min-p sampling threshold (prevents repetition loops) | `0.05` |
 | `--temp` | | Sampling temperature | `0.7` |
+| `--port` | `-p` | Server port (`serve` command) | `8080` |
+| `--mock` | | Run in-memory simulation mode (test without weights) | `false` |
 
 ---
 

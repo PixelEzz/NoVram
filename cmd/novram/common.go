@@ -66,16 +66,27 @@ func PrepareEngineParamsCustom(modelPath string, threads, batchSize, ctxSize int
 		ctxSize = 4096
 	}
 
+	numa := hw.PhysicalCores >= 16
+
 	params := engine.ModelParams{
-		ModelPath:   modelPath,
-		Threads:     threads,
-		UseMmap:     true,
-		BatchSize:   batchSize,
-		ContextSize: ctxSize,
-		PinCores:    true,
-		TurboMode:   turbo,
-		KVCacheType: "q8_0",
-		DraftTokens: 6,
+		ModelPath:        modelPath,
+		Threads:          threads,
+		BatchThreads:     hw.LogicalThreads,
+		UseMmap:          true,
+		BatchSize:        batchSize,
+		ContextSize:      ctxSize,
+		PinCores:         true,
+		TurboMode:        turbo,
+		FlashAttention:   true,
+		KVCacheType:      "q8_0",
+		CacheTypeK:       "q8_0",
+		CacheTypeV:       "q8_0",
+		SpecType:         "ngram-mod",
+		SpecDraftMax:     6,
+		SpecDraftMin:     1,
+		MinP:             0.05,
+		NumaOptimization: numa,
+		DraftTokens:      6,
 	}
 
 	return params, hw
@@ -87,9 +98,11 @@ func PrintHardwareBanner(hw cpu.Info, params engine.ModelParams) {
 	fmt.Printf("[CPU] Detected: %s\n", hw.ModelName)
 	fmt.Printf("[CPU] Core Topology: %d physical cores / %d logical threads | Vector: %s\n",
 		hw.PhysicalCores, hw.LogicalThreads, hw.VectorSummary())
-	fmt.Printf("[CPU] L3 Cache: %d KB | Batch Size: %d\n", hw.L3CacheKB, params.BatchSize)
+	fmt.Printf("[CPU] L3 Cache: %d KB | Batch Size: %d | Prefill Threads: %d\n",
+		hw.L3CacheKB, params.BatchSize, params.BatchThreads)
 	if params.TurboMode {
-		fmt.Println("[⚡ Turbo Engine] Speculative Decoding Active (5x-7x throughput acceleration) | Quantized KV Cache: Q8_0")
+		fmt.Printf("[⚡ Turbo Engine] Speculative Acceleration (%s, %d draft tokens) | Flash Attention: ON | KV Cache: %s\n",
+			params.SpecType, params.SpecDraftMax, params.KVCacheType)
 	} else {
 		fmt.Println("[Engine] Baseline Single-Token CPU Decoding Mode")
 	}

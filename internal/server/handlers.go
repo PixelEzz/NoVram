@@ -165,13 +165,14 @@ func (s *Server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	prompt := formatChatML(req.Messages)
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 2048 // Default generous token budget for rich, comprehensive answers
+		maxTokens = 4096 // Default generous token budget for rich, comprehensive answers
 	}
 
 	genParams := engine.GenParams{
 		Prompt:        prompt,
 		Temperature:   req.Temperature,
 		TopP:          req.TopP,
+		MinP:          0.05,
 		MaxTokens:     maxTokens,
 		StopSequences: req.Stop,
 		TurboMode:     true,

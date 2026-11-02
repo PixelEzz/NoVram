@@ -132,12 +132,70 @@ func (e *BackendEngine) Load(params ModelParams) error {
 		"-b", fmt.Sprintf("%d", params.BatchSize),
 		"--host", "127.0.0.1",
 		"--port", fmt.Sprintf("%d", port),
+		"--context-shift",
 	}
 
+	// Separate prompt batch threads: use all available logical threads for fast prompt ingestion (TTFT)
+	batchThreads := params.BatchThreads
+	if batchThreads <= 0 {
+		batchThreads = cpu.Detect().LogicalThreads
+	}
+	if batchThreads > 0 && batchThreads != params.Threads {
+		args = append(args, "-tb", fmt.Sprintf("%d", batchThreads))
+	}
+
+	// Flash Attention on CPU: cuts memory footprint and accelerates attention calculation
+	if params.FlashAttention {
+		args = append(args, "-fa", "on")
+	}
+
+	// Quantized KV Cache: cuts memory bus bandwidth saturation by 50%
+	cacheK := params.CacheTypeK
+	if cacheK == "" {
+		cacheK = "q8_0"
+	}
+	cacheV := params.CacheTypeV
+	if cacheV == "" {
+		cacheV = "q8_0"
+	}
+	args = append(args, "-ctk", cacheK, "-ctv", cacheV)
+
+	// Model loading mode
 	if params.UseMmap {
 		args = append(args, "-lm", "mmap")
 	} else {
 		args = append(args, "-lm", "none")
+	}
+
+	// Speculative Acceleration (Turbo Mode)
+	if params.TurboMode {
+		specType := params.SpecType
+		if specType == "" {
+			specType = "ngram-mod"
+		}
+		draftMax := params.SpecDraftMax
+		if draftMax <= 0 {
+			draftMax = 6
+		}
+		draftMin := params.SpecDraftMin
+		if draftMin <= 0 {
+			draftMin = 1
+		}
+		args = append(args,
+			"--spec-type", specType,
+			"--spec-draft-n-max", fmt.Sprintf("%d", draftMax),
+			"--spec-draft-n-min", fmt.Sprintf("%d", draftMin),
+		)
+	}
+
+	// Multi-socket / Multi-CCD NUMA optimization on high-core CPUs (e.g. VPS AMD EPYC / Xeon)
+	if params.NumaOptimization {
+		args = append(args, "--numa", "distribute")
+	}
+
+	// Min-P sampling (avoids incoherent tail tokens and repetitive token looping)
+	if params.MinP > 0 {
+		args = append(args, "--min-p", fmt.Sprintf("%.2f", params.MinP))
 	}
 
 	binDir := filepath.Dir(backendBin)
@@ -261,6 +319,7 @@ type completionRequest struct {
 	Prompt      string   `json:"prompt"`
 	Temperature float32  `json:"temperature"`
 	TopP        float32  `json:"top_p"`
+	MinP        float32  `json:"min_p,omitempty"`
 	NPredict    int      `json:"n_predict"`
 	Stream      bool     `json:"stream"`
 	Stop        []string `json:"stop,omitempty"`
@@ -289,13 +348,19 @@ func (e *BackendEngine) Generate(ctx context.Context, params GenParams, onToken 
 
 	maxTokens := params.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = 2048
+		maxTokens = 4096
+	}
+
+	minP := params.MinP
+	if minP <= 0 {
+		minP = 0.05
 	}
 
 	reqPayload := completionRequest{
 		Prompt:      params.Prompt,
 		Temperature: params.Temperature,
 		TopP:        params.TopP,
+		MinP:        minP,
 		NPredict:    maxTokens,
 		Stream:      true,
 		Stop:        params.StopSequences,

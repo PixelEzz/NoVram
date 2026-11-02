@@ -10,31 +10,50 @@ import (
 
 // ModelParams defines the low-level hardware and inference parameters for the CPU engine.
 type ModelParams struct {
-	ModelPath      string
-	Threads        int    // Defaults strictly to physical CPU cores
-	UseMmap        bool   // Zero-copy memory mapping (default: true)
-	BatchSize      int    // Prompt processing batch size (tuned for L3 cache, default: 512)
-	ContextSize    int    // Context window length (default: 4096)
-	PinCores       bool   // Bind inference threads to physical core affinities
-	TurboMode      bool   // 5x-7x speculative acceleration and quantized KV cache
-	KVCacheType    string // "q8_0" (50% memory bandwidth reduction) or "fp16"
-	DraftModelPath string // Optional lightweight draft model for speculation
-	DraftTokens    int    // Speculative draft window size (5-7 tokens per burst)
+	ModelPath        string
+	Threads          int     // Defaults strictly to physical CPU cores
+	BatchThreads     int     // Prompt batch ingestion threads (defaults to logical threads)
+	UseMmap          bool    // Zero-copy memory mapping (default: true)
+	BatchSize        int     // Prompt processing batch size (tuned for L3 cache, default: 512)
+	ContextSize      int     // Context window length (default: 4096)
+	PinCores         bool    // Bind inference threads to physical core affinities
+	TurboMode        bool    // Speculative burst acceleration and quantized KV cache
+	FlashAttention   bool    // Flash Attention on CPU (default: true)
+	KVCacheType      string  // "q8_0" (50% memory bandwidth reduction) or "fp16"
+	CacheTypeK       string  // "q8_0" or "q4_0"
+	CacheTypeV       string  // "q8_0" or "q4_0"
+	SpecType         string  // "ngram-mod" or "ngram-simple"
+	SpecDraftMax     int     // Maximum candidate tokens per forward pass (default: 6)
+	SpecDraftMin     int     // Minimum candidate tokens (default: 1)
+	MinP             float32 // Min-p probability truncation threshold (default: 0.05)
+	NumaOptimization bool    // NUMA allocation optimization for multi-socket/multi-CCD systems
+	DraftModelPath   string  // Optional lightweight draft model for speculation
+	DraftTokens      int     // Speculative draft window size (5-7 tokens per burst)
 }
 
 // DefaultModelParams creates parameters optimized for the current host CPU.
 func DefaultModelParams(modelPath string) ModelParams {
 	hw := cpu.Detect()
+	numa := hw.PhysicalCores >= 16
 	return ModelParams{
-		ModelPath:   modelPath,
-		Threads:     hw.PhysicalCores,
-		UseMmap:     true,
-		BatchSize:   cpu.RecommendedBatchSize(hw),
-		ContextSize: 4096,
-		PinCores:    true,
-		TurboMode:   true,
-		KVCacheType: "q8_0",
-		DraftTokens: 6,
+		ModelPath:        modelPath,
+		Threads:          hw.PhysicalCores,
+		BatchThreads:     hw.LogicalThreads,
+		UseMmap:          true,
+		BatchSize:        cpu.RecommendedBatchSize(hw),
+		ContextSize:      4096,
+		PinCores:         true,
+		TurboMode:        true,
+		FlashAttention:   true,
+		KVCacheType:      "q8_0",
+		CacheTypeK:       "q8_0",
+		CacheTypeV:       "q8_0",
+		SpecType:         "ngram-mod",
+		SpecDraftMax:     6,
+		SpecDraftMin:     1,
+		MinP:             0.05,
+		NumaOptimization: numa,
+		DraftTokens:      6,
 	}
 }
 
@@ -44,6 +63,7 @@ type GenParams struct {
 	SystemPrompt  string
 	Temperature   float32
 	TopP          float32
+	MinP          float32
 	MaxTokens     int
 	StopSequences []string
 	TurboMode     bool

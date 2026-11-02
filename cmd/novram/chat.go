@@ -27,10 +27,14 @@ func runChat(args []string) {
 	temp := fs.Float64("temp", 0.7, "Sampling temperature")
 	topP := fs.Float64("top-p", 0.9, "Top-p sampling")
 	systemPrompt := fs.String("system", "You are an expert AI assistant running on CPU via novram. Provide thorough, comprehensive, and detailed answers with complete code examples.", "System prompt")
-	fs.StringVar(systemPrompt, "s", "You are an expert AI assistant running on CPU via novram. Provide thorough, comprehensive, and detailed answers with complete code examples.", "System prompt")
-	turbo := fs.Bool("turbo", true, "Enable 5x-7x speculative acceleration and quantized KV cache")
-	maxTokens := fs.Int("max-tokens", 2048, "Maximum tokens to generate per response (shorthand -n)")
-	fs.IntVar(maxTokens, "n", 2048, "Maximum tokens to generate per response")
+	batchThreads := fs.Int("threads-batch", 0, "Number of threads for prompt batch processing (default: logical threads)")
+	fs.IntVar(batchThreads, "tb", 0, "Number of threads for prompt batch processing")
+	flashAttn := fs.Bool("flash-attn", true, "Enable Flash Attention on CPU")
+	fs.BoolVar(flashAttn, "fa", true, "Enable Flash Attention on CPU")
+	turbo := fs.Bool("turbo", true, "Enable speculative acceleration, quantized KV cache, and Flash Attention")
+	maxTokens := fs.Int("max-tokens", 4096, "Maximum tokens to generate per response (shorthand -n)")
+	fs.IntVar(maxTokens, "n", 4096, "Maximum tokens to generate per response")
+	minP := fs.Float64("min-p", 0.05, "Min-P dynamic sampling threshold (0.0 = disabled)")
 	useMock := fs.Bool("mock", false, "Use fast in-memory mock engine (for testing without GGUF weights)")
 
 	if err := fs.Parse(args); err != nil {
@@ -49,6 +53,11 @@ func runChat(args []string) {
 	}
 
 	params, hw := PrepareEngineParamsCustom(modelPath, *threads, *batchSize, *ctxSize, *turbo)
+	if *batchThreads > 0 {
+		params.BatchThreads = *batchThreads
+	}
+	params.FlashAttention = *flashAttn
+	params.MinP = float32(*minP)
 	PrintHardwareBanner(hw, params)
 
 	var eng engine.Engine
@@ -114,6 +123,7 @@ func runChat(args []string) {
 			SystemPrompt: *systemPrompt,
 			Temperature:  float32(*temp),
 			TopP:         float32(*topP),
+			MinP:         float32(*minP),
 			MaxTokens:    *maxTokens,
 			TurboMode:    *turbo,
 		}
